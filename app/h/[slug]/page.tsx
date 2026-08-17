@@ -437,7 +437,7 @@ export default function HouseholdPage() {
                       const { error } = await supabase.rpc('toggle_task_active', {
                         p_slug: slug,
                         p_task_id: t.id,
-                        is_selected: false,
+                        p_is_selected: false,
                       })
                       if (error) {
                         setError(error.message)
@@ -479,7 +479,7 @@ export default function HouseholdPage() {
                         const { error } = await supabase.rpc('toggle_task_active', {
                           p_slug: slug,
                           p_task_id: t.id,
-                          is_selected: true,
+                          p_is_selected: true,
                         })
                         if (error) {
                           setError(error.message)

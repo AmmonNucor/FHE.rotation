@@ -394,10 +394,6 @@ export default function HouseholdPage() {
           </div>
         )}
 
-        <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '0.5rem' }}>
-          Only one message can be sent at a time. Select either email or SMS for one member.
-        </p>
-
         <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem' }}>
           <thead>
             <tr style={{ borderBottom: '2px solid #ddd' }}>
@@ -523,6 +519,10 @@ export default function HouseholdPage() {
         <summary style={{ cursor: 'pointer', fontSize: '1.1em', fontWeight: 'bold' }}>
           Notify Members
         </summary>
+
+        <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '0.5rem' }}>
+          Only one message can be sent at a time. Select either email or SMS for one member.
+        </p>
 
         <div style={{ marginTop: '1rem' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse' }}>

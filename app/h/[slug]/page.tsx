@@ -147,7 +147,7 @@ export default function HouseholdPage() {
     const warnings: string[] = []
     const memberAssignmentCount: Record<string, number> = {}
 
-    tasks.forEach((t) => {
+    tasks.filter(t => t.is_selected).forEach((t) => {
       const memberId = assignmentDrafts[t.id]
       if (!memberId) {
         warnings.push(`${t.name} has no one assigned.`)

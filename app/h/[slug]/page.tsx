@@ -39,14 +39,20 @@ export default function HouseholdPage() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
+  const [showInactiveTasks, setShowInactiveTasks] = useState(false)
+
+  const [newTaskName, setNewTaskName] = useState('')
   const [newMemberName, setNewMemberName] = useState('')
   const [newMemberDob, setNewMemberDob] = useState('')
-  const [newTaskName, setNewTaskName] = useState('')
-  const [checkedTaskIds, setCheckedTaskIds] = useState<Set<string>>(new Set())
-  const [showInactive, setShowInactive] = useState(false)
   const [contactDrafts, setContactDrafts] = useState<Record<string, { email: string; phone: string }>>({})
-  const [notifyChecked, setNotifyChecked] = useState<Set<string>>(new Set())
+  const [notifyEmail, setNotifyEmail] = useState<Set<string>>(new Set())
+  const [notifySms, setNotifySms] = useState<Set<string>>(new Set())
   const [newCode, setNewCode] = useState('')
+  const [showInactive, setShowInactive] = useState(false)
+
+  // Assignment UI state
+  const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string>>({})
+  const [assignmentWarnings, setAssignmentWarnings] = useState<string[]>([])
 
   const loadHousehold = useCallback(async () => {
     setLoading(true)
@@ -72,13 +78,138 @@ export default function HouseholdPage() {
 
     const loadedTasks = (data.tasks || []).sort((a: Task, b: Task) => a.sort_order - b.sort_order)
     setTasks(loadedTasks)
-    setRotations(data.rotation || [])
-    setCheckedTaskIds(new Set(loadedTasks.filter((t: Task) => t.is_selected).map((t: Task) => t.id)))
+    
+    const loadedRotations = data.rotation || []
+    setRotations(loadedRotations)
+
+    // Initialize assignment drafts from current rotations
+    const draftsMap: Record<string, string> = {}
+    loadedTasks.forEach((t: Task) => {
+      const rot = loadedRotations.find((r: Rotation) => r.task_id === t.id)
+      draftsMap[t.id] = rot?.current_member_id || ''
+    })
+    setAssignmentDrafts(draftsMap)
   }, [slug])
 
   useEffect(() => {
     loadHousehold()
   }, [loadHousehold])
+
+  // --- Tasks ---
+
+  async function handleAddTask(e: React.FormEvent) {
+    e.preventDefault()
+    if (!newTaskName.trim()) return
+
+    const { error } = await supabase.rpc('add_task', {
+      p_slug: slug,
+      task_name: newTaskName.trim(),
+    })
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    setNewTaskName('')
+    loadHousehold()
+  }
+
+  async function handleRemoveTask(id: string) {
+    const { error } = await supabase.rpc('remove_task', { p_slug: slug, p_task_id: id })
+    if (error) {
+      setError(error.message)
+      return
+    }
+    loadHousehold()
+  }
+
+  async function handleMoveTask(index: number, direction: 'up' | 'down') {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    if (targetIndex < 0 || targetIndex >= tasks.length) return
+
+    const { error } = await supabase.rpc('swap_task_order', {
+      p_slug: slug,
+      p_task_id_a: tasks[index].id,
+      p_task_id_b: tasks[targetIndex].id,
+    })
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+    loadHousehold()
+  }
+
+  // --- Assignments ---
+
+  function validateAssignments(): string[] {
+    const warnings: string[] = []
+    const memberAssignmentCount: Record<string, number> = {}
+
+    tasks.forEach((t) => {
+      const memberId = assignmentDrafts[t.id]
+      if (!memberId) {
+        warnings.push(`${t.name} has no one assigned.`)
+      } else {
+        memberAssignmentCount[memberId] = (memberAssignmentCount[memberId] || 0) + 1
+      }
+    })
+
+    Object.entries(memberAssignmentCount).forEach(([memberId, count]) => {
+      if (count > 1) {
+        const member = members.find((m) => m.id === memberId)
+        warnings.push(`${member?.name} is assigned to multiple tasks.`)
+      }
+    })
+
+    return warnings
+  }
+
+  async function handleSaveAssignments() {
+    const warnings = validateAssignments()
+    if (warnings.length > 0) {
+      setAssignmentWarnings(warnings)
+      return
+    }
+    setAssignmentWarnings([])
+
+    const assignments = tasks.map((t) => ({
+      task_id: t.id,
+      member_id: assignmentDrafts[t.id],
+    }))
+
+    const { error } = await supabase.rpc('set_assignments', {
+      p_slug: slug,
+      assignments: assignments,
+    })
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+
+    loadHousehold()
+  }
+
+  async function handleAutoAssign() {
+    const activeMembers = members.filter((m) => m.is_active).sort((a, b) => a.sort_order - b.sort_order)
+    const drafts: Record<string, string> = {}
+    tasks.forEach((t, i) => {
+      drafts[t.id] = activeMembers[i % activeMembers.length]?.id || ''
+    })
+    setAssignmentDrafts(drafts)
+    setAssignmentWarnings([])
+  }
+
+  async function handleRotate() {
+    const { error } = await supabase.rpc('rotate_all', { p_slug: slug })
+    if (error) {
+      setError(error.message)
+      return
+    }
+    loadHousehold()
+  }
 
   // --- Members ---
 
@@ -163,100 +294,6 @@ export default function HouseholdPage() {
     loadHousehold()
   }
 
-  // --- Tasks ---
-
-  async function handleAddTask(e: React.FormEvent) {
-    e.preventDefault()
-    if (!newTaskName.trim()) return
-
-    const { error } = await supabase.rpc('add_task', {
-      p_slug: slug,
-      task_name: newTaskName.trim(),
-    })
-
-    if (error) {
-      setError(error.message)
-      return
-    }
-
-    setNewTaskName('')
-    loadHousehold()
-  }
-
-  async function handleRemoveTask(id: string) {
-    const { error } = await supabase.rpc('remove_task', { p_slug: slug, p_task_id: id })
-    if (error) {
-      setError(error.message)
-      return
-    }
-    loadHousehold()
-  }
-
-  function toggleTaskChecked(id: string) {
-    const next = new Set(checkedTaskIds)
-    if (next.has(id)) {
-      next.delete(id)
-    } else {
-      next.add(id)
-    }
-    setCheckedTaskIds(next)
-  }
-
-  async function handleMoveTask(index: number, direction: 'up' | 'down') {
-    const targetIndex = direction === 'up' ? index - 1 : index + 1
-    if (targetIndex < 0 || targetIndex >= tasks.length) return
-
-    const { error } = await supabase.rpc('swap_task_order', {
-      p_slug: slug,
-      p_task_id_a: tasks[index].id,
-      p_task_id_b: tasks[targetIndex].id,
-    })
-
-    if (error) {
-      setError(error.message)
-      return
-    }
-    loadHousehold()
-  }
-
-  // --- Rotation ---
-
-  async function handleSetRotation() {
-    if (checkedTaskIds.size !== activeMembers.length) {
-      setError(`Select exactly ${activeMembers.length} task(s) to match your ${activeMembers.length} active member(s).`)
-      return
-    }
-    setError('')
-
-    const { error: selectError } = await supabase.rpc('select_tasks', {
-      p_slug: slug,
-      p_task_ids: Array.from(checkedTaskIds),
-    })
-    if (selectError) {
-      setError(selectError.message)
-      return
-    }
-
-    const { error: assignError } = await supabase.rpc('auto_assign', { p_slug: slug })
-    if (assignError) {
-      setError(assignError.message)
-      return
-    }
-
-    loadHousehold()
-  }
-
-  async function handleRotate() {
-    const { error } = await supabase.rpc('rotate_all', { p_slug: slug })
-    if (error) {
-      setError(error.message)
-      return
-    }
-    loadHousehold()
-  }
-
-  // --- Household code ---
-
   async function handleRenameHousehold(e: React.FormEvent) {
     e.preventDefault()
     if (!newCode.trim()) return
@@ -276,14 +313,18 @@ export default function HouseholdPage() {
 
   // --- Notify ---
 
-  function toggleNotifyChecked(id: string) {
-    const next = new Set(notifyChecked)
-    if (next.has(id)) {
-      next.delete(id)
-    } else {
-      next.add(id)
-    }
-    setNotifyChecked(next)
+  function toggleNotifyEmail(id: string) {
+    const next = new Set(notifyEmail)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setNotifyEmail(next)
+  }
+
+  function toggleNotifySms(id: string) {
+    const next = new Set(notifySms)
+    if (next.has(id)) next.delete(id)
+    else next.add(id)
+    setNotifySms(next)
   }
 
   function getAssignedTaskName(memberId: string): string | null {
@@ -293,97 +334,248 @@ export default function HouseholdPage() {
     return task ? task.name : null
   }
 
-  function handleSendEmail() {
-    const selected = members.filter((m) => notifyChecked.has(m.id))
-    for (const m of selected) {
-      const taskName = getAssignedTaskName(m.id)
-      if (!m.email || !taskName) continue
+  async function handleSendNotifications() {
+    // Send emails
+    for (const memberId of notifyEmail) {
+      const member = members.find((m) => m.id === memberId)
+      const taskName = getAssignedTaskName(memberId)
+      if (!member || !member.email || !taskName) continue
+
       const subject = encodeURIComponent(`Your task this week: ${taskName}`)
-      const body = encodeURIComponent(`Hi ${m.name},\n\nYou're assigned to "${taskName}" this week.\n\nThanks!`)
-      window.open(`mailto:${m.email}?subject=${subject}&body=${body}`, '_blank')
+      const body = encodeURIComponent(`Hi ${member.name},\n\nYou're assigned to "${taskName}" this week.\n\nThanks!`)
+      window.open(`mailto:${member.email}?subject=${subject}&body=${body}`, '_blank')
     }
-  }
 
-  function handleSendText() {
-    const selected = members.filter((m) => notifyChecked.has(m.id))
-    for (const m of selected) {
-      const taskName = getAssignedTaskName(m.id)
-      if (!m.phone || !taskName) continue
-      const body = encodeURIComponent(`Hi ${m.name}, you're assigned to "${taskName}" this week.`)
-      window.open(`sms:${m.phone}&body=${body}`, '_blank')
+    // Send texts
+    for (const memberId of notifySms) {
+      const member = members.find((m) => m.id === memberId)
+      const taskName = getAssignedTaskName(memberId)
+      if (!member || !member.phone || !taskName) continue
+
+      const body = encodeURIComponent(`Hi ${member.name}, you're assigned to "${taskName}" this week.`)
+      window.open(`sms:${member.phone}&body=${body}`, '_blank')
     }
-  }
 
-  function getMemberName(id: string | undefined) {
-    if (!id) return 'Unassigned'
-    const member = members.find((m) => m.id === id)
-    return member ? member.name : 'Unassigned'
+    setNotifyEmail(new Set())
+    setNotifySms(new Set())
   }
 
   const activeMembers = members.filter((m) => m.is_active).sort((a, b) => a.sort_order - b.sort_order)
   const inactiveMembers = members.filter((m) => !m.is_active)
-  const selectedTasks = tasks.filter((t) => t.is_selected).sort((a, b) => a.sort_order - b.sort_order)
-  const hasActiveRotation = selectedTasks.length > 0 && selectedTasks.length === activeMembers.length
 
   if (loading) return <main style={{ padding: '2rem' }}>Loading...</main>
 
   return (
-    <main style={{ maxWidth: 600, margin: '2rem auto', padding: '0 1rem' }}>
+    <main style={{ maxWidth: 700, margin: '2rem auto', padding: '0 1rem' }}>
       <h1>{householdName}</h1>
       {error && <p style={{ color: 'red' }}>{error}</p>}
 
-      {/* Primary view: current assignments */}
-      {hasActiveRotation && (
-        <section style={{ marginTop: '1.5rem' }}>
-          <h2>Current Assignments</h2>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {selectedTasks.map((t) => {
-              const rotation = rotations.find((r) => r.task_id === t.id)
-              return (
-                <li key={t.id} style={{ padding: '0.5rem 0', borderBottom: '1px solid #eee' }}>
-                  <strong>{t.name}</strong>: {getMemberName(rotation?.current_member_id)}
-                </li>
-              )
-            })}
-          </ul>
-          <button onClick={handleRotate} style={{ marginTop: '0.75rem', width: '100%', padding: '0.5rem' }}>
-            Rotate
-          </button>
+      {/* Tasks & Assignments */}
+      <section style={{ marginTop: '2rem' }}>
+        <h2>Tasks & Assignments</h2>
 
-          <div style={{ marginTop: '1.5rem' }}>
-            <h3>Notify</h3>
-            <ul style={{ listStyle: 'none', padding: 0 }}>
-              {activeMembers.map((m) => (
-                <li key={m.id} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.25rem 0' }}>
-                  <input
-                    type="checkbox"
-                    checked={notifyChecked.has(m.id)}
-                    onChange={() => toggleNotifyChecked(m.id)}
-                  />
-                  <span>{m.name} — {getAssignedTaskName(m.id) || 'Unassigned'}</span>
-                </li>
+        <div style={{ marginBottom: '1rem' }}>
+          <button onClick={handleAutoAssign} style={{ marginRight: '0.5rem', padding: '0.5rem 1rem' }}>
+            Auto-assign
+          </button>
+          <button onClick={handleSaveAssignments} style={{ padding: '0.5rem 1rem' }}>
+            Save Assignments
+          </button>
+        </div>
+
+        {assignmentWarnings.length > 0 && (
+          <div style={{ backgroundColor: '#ffe6e6', padding: '0.5rem', marginBottom: '1rem', borderRadius: '4px' }}>
+            <strong>Fix these issues:</strong>
+            <ul style={{ margin: '0.5rem 0 0 1.5rem' }}>
+              {assignmentWarnings.map((w, i) => (
+                <li key={i}>{w}</li>
               ))}
             </ul>
-            <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-              <button onClick={handleSendEmail} style={{ flex: 1, padding: '0.5rem' }}>Send Email</button>
-              <button onClick={handleSendText} style={{ flex: 1, padding: '0.5rem' }}>Send Text</button>
-            </div>
-            <p style={{ fontSize: '0.85em', color: '#666' }}>
-              Opens a pre-filled message per person in your Mail/Messages app — you'll tap send on each.
-              Members need an email or phone number saved below to receive a message.
-            </p>
           </div>
-        </section>
-      )}
+        )}
 
-      {/* Setup / management */}
-      <details open={!hasActiveRotation} style={{ marginTop: '2rem' }}>
-        <summary style={{ cursor: 'pointer', fontSize: '1.2em', fontWeight: 'bold' }}>
-          {hasActiveRotation ? 'Manage Members & Tasks' : 'Set Up Rotation'}
+        <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '0.5rem' }}>
+          Only one message can be sent at a time. Select either email or SMS for one member.
+        </p>
+
+        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem' }}>
+          <thead>
+            <tr style={{ borderBottom: '2px solid #ddd' }}>
+              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Task</th>
+              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Assigned to</th>
+              <th style={{ textAlign: 'center', padding: '0.5rem' }}>Active</th>
+              <th style={{ textAlign: 'center', padding: '0.5rem' }}>Actions</th>
+            </tr>
+          </thead>
+          <tbody>
+            {tasks.filter(t => t.is_selected).map((t, i) => (
+              <tr key={t.id} style={{ borderBottom: '1px solid #eee' }}>
+                <td style={{ padding: '0.5rem' }}>{t.name}</td>
+                <td style={{ padding: '0.5rem' }}>
+                  <select
+                    value={assignmentDrafts[t.id] || ''}
+                    onChange={(e) => setAssignmentDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
+                    style={{ 
+                      padding: '0.5rem', 
+                      width: '100%',
+                      border: '2px solid #333',
+                      borderRadius: '4px',
+                      fontSize: '1rem',
+                      backgroundColor: '#fff',
+                      color: '#000',
+                      cursor: 'pointer',
+                      fontWeight: '500'
+                    }}
+                  >
+                    <option value="">Select member...</option>
+                    {activeMembers.map((m) => (
+                      <option key={m.id} value={m.id}>
+                        {m.name} (age {calculateAge(m.date_of_birth)})
+                      </option>
+                    ))}
+                  </select>
+                </td>
+                <td style={{ textAlign: 'center', padding: '0.5rem' }}>
+                  <button 
+                    onClick={async () => {
+                      const { error } = await supabase.rpc('toggle_task_active', {
+                        p_slug: slug,
+                        p_task_id: t.id,
+                        is_selected: false,
+                      })
+                      if (error) {
+                        setError(error.message)
+                      } else {
+                        loadHousehold()
+                      }
+                    }}
+                    style={{ padding: '0.5rem' }}
+                  >
+                    Deactivate
+                  </button>
+                </td>
+                <td style={{ textAlign: 'center', padding: '0.5rem' }}>
+                  <button onClick={() => handleMoveTask(i, 'up')} disabled={i === 0} style={{ padding: '0.5rem', marginRight: '0.5rem' }}>↑</button>
+                  <button onClick={() => handleMoveTask(i, 'down')} disabled={i === tasks.length - 1} style={{ padding: '0.5rem', marginRight: '0.5rem' }}>↓</button>
+                  <button onClick={() => handleRemoveTask(t.id)} style={{ padding: '0.5rem' }}>Remove</button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        
+        {tasks.filter(t => !t.is_selected).length > 0 && (
+          <div style={{ marginTop: '1rem' }}>
+            <button 
+              onClick={() => setShowInactiveTasks(!showInactiveTasks)}
+              style={{ fontSize: '0.9em', marginBottom: '0.5rem' }}
+            >
+              {showInactiveTasks ? 'Hide' : 'Show'} inactive tasks ({tasks.filter(t => !t.is_selected).length})
+            </button>
+            
+            {showInactiveTasks && (
+              <ul style={{ listStyle: 'none', padding: 0 }}>
+                {tasks.filter(t => !t.is_selected).map((t) => (
+                  <li key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #eee', opacity: 0.6 }}>
+                    <span>{t.name}</span>
+                    <button 
+                      onClick={async () => {
+                        const { error } = await supabase.rpc('toggle_task_active', {
+                          p_slug: slug,
+                          p_task_id: t.id,
+                          is_selected: true,
+                        })
+                        if (error) {
+                          setError(error.message)
+                        } else {
+                          loadHousehold()
+                        }
+                      }}
+                      style={{ padding: '0.5rem' }}
+                    >
+                      Activate
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+        )}
+
+        <form onSubmit={handleAddTask} style={{ display: 'flex', gap: '0.5rem' }}>
+          <input
+            type="text"
+            placeholder="New task name"
+            value={newTaskName}
+            onChange={(e) => setNewTaskName(e.target.value)}
+            style={{ flex: 1, padding: '0.5rem' }}
+          />
+          <button type="submit">Add Task</button>
+        </form>
+
+        <button onClick={handleRotate} style={{ marginTop: '1rem', width: '100%', padding: '0.5rem', fontSize: '1rem' }}>
+          Rotate
+        </button>
+      </section>
+
+      {/* Notify */}
+      <details style={{ marginTop: '2rem' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '1.1em', fontWeight: 'bold' }}>
+          Notify Members
+        </summary>
+
+        <div style={{ marginTop: '1rem' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
+            <thead>
+              <tr style={{ borderBottom: '2px solid #ddd' }}>
+                <th style={{ textAlign: 'left', padding: '0.5rem' }}>Member (Task)</th>
+                <th style={{ textAlign: 'center', padding: '0.5rem' }}>Email</th>
+                <th style={{ textAlign: 'center', padding: '0.5rem' }}>SMS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeMembers.map((m) => (
+                <tr key={m.id} style={{ borderBottom: '1px solid #eee' }}>
+                  <td style={{ padding: '0.5rem' }}>
+                    {m.name} ({getAssignedTaskName(m.id) || 'Unassigned'})
+                  </td>
+                  <td style={{ textAlign: 'center', padding: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={notifyEmail.has(m.id)}
+                      onChange={() => toggleNotifyEmail(m.id)}
+                      disabled={!m.email}
+                    />
+                  </td>
+                  <td style={{ textAlign: 'center', padding: '0.5rem' }}>
+                    <input
+                      type="checkbox"
+                      checked={notifySms.has(m.id)}
+                      onChange={() => toggleNotifySms(m.id)}
+                      disabled={!m.phone}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={handleSendNotifications} style={{ marginTop: '0.75rem', width: '100%', padding: '0.5rem' }}>
+            Send
+          </button>
+          <p style={{ fontSize: '0.85em', color: '#666', marginTop: '0.5rem' }}>
+            Opens pre-filled messages in your Mail/Messages app for each selected recipient — you tap send on each.
+          </p>
+        </div>
+      </details>
+
+      {/* Members */}
+      <details open style={{ marginTop: '2rem' }}>
+        <summary style={{ cursor: 'pointer', fontSize: '1.1em', fontWeight: 'bold' }}>
+          Manage Members
         </summary>
 
         <section style={{ marginTop: '1rem' }}>
-          <h3>Members</h3>
+          <h3>Active Members</h3>
           <ul style={{ listStyle: 'none', padding: 0 }}>
             {activeMembers.map((m, i) => (
               <li key={m.id} style={{ padding: '0.5rem 0', borderBottom: '1px solid #eee' }}>
@@ -438,7 +630,7 @@ export default function HouseholdPage() {
             onClick={() => setShowInactive(!showInactive)}
             style={{ marginTop: '0.75rem', fontSize: '0.9em' }}
           >
-            {showInactive ? 'Hide' : 'Show'} inactive members ({inactiveMembers.length})
+            {showInactive ? 'Hide' : 'Show'} inactive ({inactiveMembers.length})
           </button>
 
           {showInactive && (
@@ -454,55 +646,12 @@ export default function HouseholdPage() {
         </section>
 
         <section style={{ marginTop: '1.5rem' }}>
-          <h3>Tasks</h3>
-          <p style={{ fontSize: '0.9em', color: '#666' }}>
-            Select {activeMembers.length} task{activeMembers.length === 1 ? '' : 's'} for the current rotation.
-          </p>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
-            {tasks.map((t, i) => (
-              <li key={t.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #eee' }}>
-                <label style={{ display: 'flex', alignItems: 'center', gap: '0.5rem' }}>
-                  <input
-                    type="checkbox"
-                    checked={checkedTaskIds.has(t.id)}
-                    onChange={() => toggleTaskChecked(t.id)}
-                  />
-                  {t.name}
-                </label>
-                <div style={{ display: 'flex', gap: '0.25rem' }}>
-                  <button onClick={() => handleMoveTask(i, 'up')} disabled={i === 0}>↑</button>
-                  <button onClick={() => handleMoveTask(i, 'down')} disabled={i === tasks.length - 1}>↓</button>
-                  <button onClick={() => handleRemoveTask(t.id)}>Remove</button>
-                </div>
-              </li>
-            ))}
-          </ul>
-          <form onSubmit={handleAddTask} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
-            <input
-              type="text"
-              placeholder="Task name"
-              value={newTaskName}
-              onChange={(e) => setNewTaskName(e.target.value)}
-              style={{ flex: 1, padding: '0.5rem' }}
-            />
-            <button type="submit">Add</button>
-          </form>
-          <button
-            onClick={handleSetRotation}
-            disabled={activeMembers.length === 0}
-            style={{ marginTop: '0.75rem', width: '100%', padding: '0.5rem' }}
-          >
-            Set Rotation ({checkedTaskIds.size}/{activeMembers.length} selected)
-          </button>
-        </section>
-
-        <section style={{ marginTop: '1.5rem' }}>
           <h3>Household Code</h3>
-          <p style={{ fontSize: '0.9em', color: '#666' }}>Current code: {slug}</p>
+          <p style={{ fontSize: '0.9em', color: '#666' }}>Current: {slug}</p>
           <form onSubmit={handleRenameHousehold} style={{ display: 'flex', gap: '0.5rem' }}>
             <input
               type="text"
-              placeholder="New household code"
+              placeholder="New code"
               value={newCode}
               onChange={(e) => setNewCode(e.target.value)}
               style={{ flex: 1, padding: '0.5rem' }}

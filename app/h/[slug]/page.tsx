@@ -195,7 +195,7 @@ export default function HouseholdPage() {
   async function handleAutoAssign() {
     const activeMembers = members.filter((m) => m.is_active).sort((a, b) => a.sort_order - b.sort_order)
     const drafts: Record<string, string> = {}
-    tasks.forEach((t, i) => {
+    tasks.filter(t => t.is_selected).forEach((t, i) => {
       drafts[t.id] = activeMembers[i % activeMembers.length]?.id || ''
     })
     setAssignmentDrafts(drafts)

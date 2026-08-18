@@ -174,7 +174,7 @@ export default function HouseholdPage() {
     }
     setAssignmentWarnings([])
 
-    const assignments = tasks.map((t) => ({
+    const assignments = tasks.filter(t => t.is_selected).map((t) => ({
       task_id: t.id,
       member_id: assignmentDrafts[t.id],
     }))

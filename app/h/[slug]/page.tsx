@@ -381,6 +381,9 @@ export default function HouseholdPage() {
           <button onClick={handleSaveAssignments} style={{ padding: '0.5rem 1rem' }}>
             Save Assignments
           </button>
+          <button onClick={handleRotate} style={{ padding: "0.5rem 1rem" }}>
+            Rotate
+          </button>
         </div>
 
         {assignmentWarnings.length > 0 && (
@@ -509,9 +512,6 @@ export default function HouseholdPage() {
           <button type="submit">Add Task</button>
         </form>
 
-        <button onClick={handleRotate} style={{ marginTop: '1rem', width: '100%', padding: '0.5rem', fontSize: '1rem' }}>
-          Rotate
-        </button>
       </section>
 
       {/* Notify */}

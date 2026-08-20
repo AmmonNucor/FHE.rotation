@@ -1,4 +1,7 @@
 <svg viewBox="0 0 120 120" xmlns="http://www.w3.org/2000/svg">
+  <!-- Background circle -->
+  <circle cx="60" cy="60" r="58" fill="#FAF6F1"/>
+  
   <!-- Roof -->
   <path d="M 30 70 L 60 35 L 90 70" fill="none" stroke="#D4A574" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
   

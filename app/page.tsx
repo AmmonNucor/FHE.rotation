@@ -72,7 +72,7 @@ export default function HomePage() {
       </details>
 
       <details>
-        <summary>Join Existing Household</summary>
+        <summary>Go to an Existing Household</summary>
         <form onSubmit={handleExistingHousehold}>
           <input
             type="text"

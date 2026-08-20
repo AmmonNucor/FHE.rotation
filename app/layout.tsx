@@ -15,6 +15,9 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "Family Home Evening Rotation",
   description: "Manage family home evening tasks and assignments",
+  icons: {
+    icon: '/favicon.svg',
+  },
 };
 
 export default function RootLayout({ children }: LayoutProps<"/">) {

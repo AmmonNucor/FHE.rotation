@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState, useCallback } from 'react'
+import { useEffect, useState, useCallback, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { supabase } from '@/lib/supabase'
 
@@ -15,6 +15,13 @@ type Member = {
 }
 type Task = { id: string; name: string; sort_order: number; is_selected: boolean }
 type Rotation = { task_id: string; current_member_id: string }
+
+type Household = {
+  id: string
+  name: string
+  members_sort_mode: 'manual' | 'age'
+  members_age_sort_desc: boolean
+}
 
 function calculateAge(dob: string): number {
   const birthDate = new Date(dob)
@@ -32,6 +39,7 @@ export default function HouseholdPage() {
   const router = useRouter()
   const slug = params.slug as string
 
+  const [household, setHousehold] = useState<Household | null>(null)
   const [householdName, setHouseholdName] = useState('')
   const [members, setMembers] = useState<Member[]>([])
   const [tasks, setTasks] = useState<Task[]>([])
@@ -54,6 +62,55 @@ export default function HouseholdPage() {
   const [assignmentDrafts, setAssignmentDrafts] = useState<Record<string, string>>({})
   const [assignmentWarnings, setAssignmentWarnings] = useState<string[]>([])
 
+  // Numeric reorder input state
+  const [memberReorderInputs, setMemberReorderInputs] = useState<Record<string, string>>({})
+  const [taskReorderInputs, setTaskReorderInputs] = useState<Record<string, string>>({})
+
+  // Section collapse state
+  const tasksRef = useRef<HTMLDetailsElement>(null)
+  const membersRef = useRef<HTMLDetailsElement>(null)
+
+    useEffect(() => {
+      try {
+        const saved = localStorage.getItem('fhe-open-sections')
+        if (saved) {
+          const state = JSON.parse(saved)
+          if (tasksRef.current) tasksRef.current.open = state.tasks
+          if (membersRef.current) membersRef.current.open = state.members
+        }
+      } catch (e) {
+        // ignore
+      }
+    }, [])
+
+  const [openSections, setOpenSections] = useState<Record<string, boolean>>(() => {
+    try {
+      const saved = localStorage.getItem('fhe-open-sections')
+      return saved ? JSON.parse(saved) : {
+        assignments: true,
+        notify: false,
+        tasks: false,
+        members: false,
+      }
+    } catch (e) {
+      return {
+        assignments: true,
+        notify: false,
+        tasks: false,
+        members: false,
+      }
+    }
+  })
+
+  // Toggle section and save to localStorage
+  const toggleSection = (section: string) => {
+    console.log('Toggling:', section, 'from', openSections[section])
+    const next = { ...openSections, [section]: !openSections[section] }
+    console.log('New state:', next)
+    setOpenSections(next)
+    localStorage.setItem('fhe-open-sections', JSON.stringify(next))
+  }
+
   const loadHousehold = useCallback(async () => {
     setLoading(true)
     const { data, error } = await supabase.rpc('get_household', { p_slug: slug })
@@ -64,11 +121,37 @@ export default function HouseholdPage() {
       return
     }
 
+    const householdData: Household = {
+      id: data.household.id,
+      name: data.household.name,
+      members_sort_mode: data.household.members_sort_mode || 'manual',
+      members_age_sort_desc: data.household.members_age_sort_desc || false,
+    }
+    setHousehold(householdData)
     setHouseholdName(data.household.name)
-    const loadedMembers: Member[] = (data.members || []).sort(
+
+    let loadedMembers: Member[] = (data.members || []).sort(
       (a: Member, b: Member) => a.sort_order - b.sort_order
     )
+
+    // If in age mode, sort by age
+    if (householdData.members_sort_mode === 'age') {
+      loadedMembers = loadedMembers.sort((a: Member, b: Member) => {
+        const ageA = calculateAge(a.date_of_birth)
+        const ageB = calculateAge(b.date_of_birth)
+        const comparison = ageA - ageB
+        return householdData.members_age_sort_desc ? -comparison : comparison
+      })
+    }
+
     setMembers(loadedMembers)
+
+    // Initialize reorder inputs
+    const memberInputs: Record<string, string> = {}
+    loadedMembers.filter((m: Member) => m.is_active).forEach((m: Member, index: number) => {
+      memberInputs[m.id] = String(index + 1)
+    })
+    setMemberReorderInputs(memberInputs)
 
     const drafts: Record<string, { email: string; phone: string }> = {}
     loadedMembers.forEach((m) => {
@@ -78,6 +161,13 @@ export default function HouseholdPage() {
 
     const loadedTasks = (data.tasks || []).sort((a: Task, b: Task) => a.sort_order - b.sort_order)
     setTasks(loadedTasks)
+
+    // Initialize task reorder inputs
+    const taskInputs: Record<string, string> = {}
+    loadedTasks.filter((t: Task) => t.is_selected).forEach((t: Task, index: number) => {
+      taskInputs[t.id] = String(index + 1)
+    })
+    setTaskReorderInputs(taskInputs)
     
     const loadedRotations = data.rotation || []
     setRotations(loadedRotations)
@@ -124,14 +214,17 @@ export default function HouseholdPage() {
     loadHousehold()
   }
 
-  async function handleMoveTask(index: number, direction: 'up' | 'down') {
-    const targetIndex = direction === 'up' ? index - 1 : index + 1
-    if (targetIndex < 0 || targetIndex >= tasks.length) return
+  async function handleReorderTask(taskId: string, newOrderStr: string) {
+    const newOrder = parseInt(newOrderStr, 10)
+    if (isNaN(newOrder) || newOrder < 1) return
 
-    const { error } = await supabase.rpc('swap_task_order', {
+    const activeTasks = tasks.filter(t => t.is_selected)
+    if (newOrder > activeTasks.length) return
+
+    const { error } = await supabase.rpc('reorder_task', {
       p_slug: slug,
-      p_task_id_a: tasks[index].id,
-      p_task_id_b: tasks[targetIndex].id,
+      p_task_id: taskId,
+      p_new_sort_order: newOrder,
     })
 
     if (error) {
@@ -255,14 +348,31 @@ export default function HouseholdPage() {
     loadHousehold()
   }
 
-  async function handleMoveMember(index: number, direction: 'up' | 'down') {
-    const targetIndex = direction === 'up' ? index - 1 : index + 1
-    if (targetIndex < 0 || targetIndex >= activeMembers.length) return
+  async function handleReorderMember(memberId: string, newOrderStr: string) {
+    const newOrder = parseInt(newOrderStr, 10)
+    if (isNaN(newOrder) || newOrder < 1) return
 
-    const { error } = await supabase.rpc('swap_member_order', {
+    const activeMembers = members.filter(m => m.is_active)
+    if (newOrder > activeMembers.length) return
+
+    const { error } = await supabase.rpc('reorder_member', {
       p_slug: slug,
-      p_member_id_a: activeMembers[index].id,
-      p_member_id_b: activeMembers[targetIndex].id,
+      p_member_id: memberId,
+      p_new_sort_order: newOrder,
+    })
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+    loadHousehold()
+  }
+
+  async function handleToggleSortMode() {
+    if (!household) return
+
+    const { error } = await supabase.rpc('toggle_member_sort_mode', {
+      p_slug: slug,
     })
 
     if (error) {
@@ -352,130 +462,225 @@ export default function HouseholdPage() {
       const taskName = getAssignedTaskName(memberId)
       if (!member || !member.phone || !taskName) continue
 
-      const body = encodeURIComponent(`Hi ${member.name}, you're assigned to "${taskName}" this week.`)
-      window.open(`sms:${member.phone}&body=${body}`, '_blank')
+      const body = encodeURIComponent(`Hi ${member.name}, you're assigned to "${taskName}" this week. Thanks!`)
+      window.open(`sms:${member.phone}?body=${body}`, '_blank')
     }
 
     setNotifyEmail(new Set())
     setNotifySms(new Set())
   }
 
-  const activeMembers = members.filter((m) => m.is_active).sort((a, b) => a.sort_order - b.sort_order)
+  const activeMembers = members.filter((m) => m.is_active)
   const inactiveMembers = members.filter((m) => !m.is_active)
 
-  if (loading) return <main style={{ padding: '2rem' }}>Loading...</main>
+  if (loading) return <main>Loading...</main>
+  if (error) return <main>Error: {error}</main>
 
   return (
-    <main style={{ maxWidth: 700, margin: '2rem auto', padding: '0 1rem' }}>
-      <h1>{householdName}</h1>
-      {error && <p style={{ color: 'red' }}>{error}</p>}
-
-      {/* Tasks & Assignments */}
-      <section style={{ marginTop: '2rem' }}>
-        <h2>Tasks & Assignments</h2>
-
-        <div style={{ marginBottom: '1rem' }}>
-          <button onClick={handleAutoAssign} style={{ marginRight: '0.5rem', padding: '0.5rem 1rem' }}>
-            Auto-assign
-          </button>
-          <button onClick={handleSaveAssignments} style={{ padding: '0.5rem 1rem' }}>
-            Save Assignments
-          </button>
-          <button onClick={handleRotate} style={{ padding: "0.5rem 1rem" }}>
-            Rotate
-          </button>
+    <main>
+      <header>
+        <img 
+          src="/family-circle-logo.svg" 
+          alt="Family Home Evening" 
+          style={{ width: '160px', height: '160px', marginBottom: '1rem' }}
+        />
+        <div className="header" style={{ letterSpacing: '1px', marginBottom: '1rem' }}>
+          Family Home Evening
         </div>
+        <h1>{householdName}</h1>
+      </header>
+
+
+      {/* Assignments */}
+      <details open>
+        <summary>
+          Assignments
+        </summary>
 
         {assignmentWarnings.length > 0 && (
-          <div style={{ backgroundColor: '#ffe6e6', padding: '0.5rem', marginBottom: '1rem', borderRadius: '4px' }}>
-            <strong>Fix these issues:</strong>
-            <ul style={{ margin: '0.5rem 0 0 1.5rem' }}>
-              {assignmentWarnings.map((w, i) => (
-                <li key={i}>{w}</li>
-              ))}
+          <div>
+            <strong>Issues:</strong>
+            <ul>
+              {assignmentWarnings.map((w, i) => <li key={i}>{w}</li>)}
             </ul>
           </div>
         )}
 
-        <table style={{ width: '100%', borderCollapse: 'collapse', marginBottom: '1rem' }}>
-          <thead>
-            <tr style={{ borderBottom: '2px solid #ddd' }}>
-              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Task</th>
-              <th style={{ textAlign: 'left', padding: '0.5rem' }}>Assigned to</th>
-              <th style={{ textAlign: 'center', padding: '0.5rem' }}>Active</th>
-              <th style={{ textAlign: 'center', padding: '0.5rem' }}>Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {tasks.filter(t => t.is_selected).map((t, i) => (
-              <tr key={t.id} style={{ borderBottom: '1px solid #eee' }}>
-                <td style={{ padding: '0.5rem' }}>{t.name}</td>
-                <td style={{ padding: '0.5rem' }}>
-                  <select
-                    value={assignmentDrafts[t.id] || ''}
-                    onChange={(e) => setAssignmentDrafts((prev) => ({ ...prev, [t.id]: e.target.value }))}
-                    style={{ 
-                      padding: '0.5rem', 
-                      width: '100%',
-                      border: '2px solid #333',
-                      borderRadius: '4px',
-                      fontSize: '1rem',
-                      backgroundColor: '#fff',
-                      color: '#000',
-                      cursor: 'pointer',
-                      fontWeight: '500'
-                    }}
-                  >
-                    <option value="">Select member...</option>
-                    {activeMembers.map((m) => (
-                      <option key={m.id} value={m.id}>
-                        {m.name} (age {calculateAge(m.date_of_birth)})
-                      </option>
-                    ))}
-                  </select>
-                </td>
-                <td style={{ textAlign: 'center', padding: '0.5rem' }}>
-                  <button 
-                    onClick={async () => {
-                      const { error } = await supabase.rpc('toggle_task_active', {
-                        p_slug: slug,
-                        p_task_id: t.id,
-                        p_is_selected: false,
-                      })
-                      if (error) {
-                        setError(error.message)
-                      } else {
-                        loadHousehold()
-                      }
-                    }}
-                    style={{ padding: '0.5rem' }}
-                  >
-                    Deactivate
-                  </button>
-                </td>
-                <td style={{ textAlign: 'center', padding: '0.5rem' }}>
-                  <button onClick={() => handleMoveTask(i, 'up')} disabled={i === 0} style={{ padding: '0.5rem', marginRight: '0.5rem' }}>↑</button>
-                  <button onClick={() => handleMoveTask(i, 'down')} disabled={i === tasks.length - 1} style={{ padding: '0.5rem', marginRight: '0.5rem' }}>↓</button>
-                  <button onClick={() => handleRemoveTask(t.id)} style={{ padding: '0.5rem' }}>Remove</button>
-                </td>
+        <div>
+          <table>
+            <thead>
+              <tr>
+                <th>Task</th>
+                <th>Assigned To</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-        
+            </thead>
+            <tbody>
+              {tasks.filter(t => t.is_selected).map((t) => (
+                <tr key={t.id}>
+                  <td>{t.name}</td>
+                  <td>
+                    <select
+                      value={assignmentDrafts[t.id] || ''}
+                      onChange={(e) => setAssignmentDrafts(prev => ({ ...prev, [t.id]: e.target.value }))}
+                    >
+                      <option value="">— Unassigned —</option>
+                      {activeMembers.map((m) => (
+                        <option key={m.id} value={m.id}>{m.name}</option>
+                      ))}
+                    </select>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <div>
+            <button onClick={handleAutoAssign}>
+              Auto-assign
+            </button>
+            <button onClick={handleSaveAssignments}>
+              Save Assignments
+            </button>
+            <button onClick={handleRotate}>
+              Rotate to Next
+            </button>
+          </div>
+        </div>
+      </details>
+
+      {/* Notify */}
+      <details>
+        <summary>
+          Notify Members
+        </summary>
+
+        <p>
+          Only one message can be sent at a time. Select either email or SMS for one member.
+        </p>
+
+        <div>
+          <table>
+            <thead>
+              <tr>
+                <th>Member (Task)</th>
+                <th>Email</th>
+                <th>SMS</th>
+              </tr>
+            </thead>
+            <tbody>
+              {activeMembers.map((m) => (
+                <tr key={m.id}>
+                  <td>
+                    {m.name} ({getAssignedTaskName(m.id) || 'Unassigned'})
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={notifyEmail.has(m.id)}
+                      onChange={() => toggleNotifyEmail(m.id)}
+                      disabled={!m.email}
+                    />
+                  </td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={notifySms.has(m.id)}
+                      onChange={() => toggleNotifySms(m.id)}
+                      disabled={!m.phone}
+                    />
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+          <button onClick={handleSendNotifications}>
+            Send
+          </button>
+          <p>
+            Opens pre-filled messages in your Mail/Messages app for each selected recipient — you tap send on each.
+          </p>
+        </div>
+      </details>
+
+      {/* Tasks */}
+      <details ref={tasksRef} onToggle={() => toggleSection('tasks')}>
+        <summary>
+          Manage Tasks
+        </summary>
+
+        <section>
+          <h3>Active Tasks</h3>
+          <table>
+            <thead>
+              <tr>
+                <th>Order</th>
+                <th>Task</th>
+                <th>Active</th>
+                <th>Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {tasks.filter(t => t.is_selected).map((t, i) => (
+                <tr key={t.id}>
+                  <td>
+                    <input
+                      type="number"
+                      min="1"
+                      max={tasks.filter(tk => tk.is_selected).length}
+                      value={taskReorderInputs[t.id] || ''}
+                      onChange={(e) => {
+                        setTaskReorderInputs(prev => ({ ...prev, [t.id]: e.target.value }))
+                      }}
+                      onBlur={() => {
+                        if (taskReorderInputs[t.id]) {
+                          handleReorderTask(t.id, taskReorderInputs[t.id])
+                        }
+                      }}
+                    />
+                  </td>
+                  <td>{t.name}</td>
+                  <td>
+                    <input
+                      type="checkbox"
+                      checked={t.is_selected}
+                      onChange={async () => {
+                        const { error } = await supabase.rpc('toggle_task_active', {
+                          p_slug: slug,
+                          p_task_id: t.id,
+                          p_is_selected: !t.is_selected,
+                        })
+                        if (error) {
+                          setError(error.message)
+                        } else {
+                          loadHousehold()
+                        }
+                      }}
+                    />
+                  </td>
+                  <td>
+                    <button
+                      onClick={() => handleRemoveTask(t.id)}
+                    >
+                      Remove
+                    </button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </section>
+
         {tasks.filter(t => !t.is_selected).length > 0 && (
-          <div style={{ marginTop: '1rem' }}>
+          <div>
             <button 
               onClick={() => setShowInactiveTasks(!showInactiveTasks)}
-              style={{ fontSize: '0.9em', marginBottom: '0.5rem' }}
             >
               {showInactiveTasks ? 'Hide' : 'Show'} inactive tasks ({tasks.filter(t => !t.is_selected).length})
             </button>
             
             {showInactiveTasks && (
-              <ul style={{ listStyle: 'none', padding: 0 }}>
+              <ul>
                 {tasks.filter(t => !t.is_selected).map((t) => (
-                  <li key={t.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #eee', opacity: 0.6 }}>
+                  <li key={t.id}>
                     <span>{t.name}</span>
                     <button 
                       onClick={async () => {
@@ -490,7 +695,6 @@ export default function HouseholdPage() {
                           loadHousehold()
                         }
                       }}
-                      style={{ padding: '0.5rem' }}
                     >
                       Activate
                     </button>
@@ -501,160 +705,131 @@ export default function HouseholdPage() {
           </div>
         )}
 
-        <form onSubmit={handleAddTask} style={{ display: 'flex', gap: '0.5rem' }}>
+        <form onSubmit={handleAddTask}>
           <input
             type="text"
             placeholder="New task name"
             value={newTaskName}
             onChange={(e) => setNewTaskName(e.target.value)}
-            style={{ flex: 1, padding: '0.5rem' }}
           />
           <button type="submit">Add Task</button>
         </form>
 
-      </section>
-
-      {/* Notify */}
-      <details style={{ marginTop: '2rem' }}>
-        <summary style={{ cursor: 'pointer', fontSize: '1.1em', fontWeight: 'bold' }}>
-          Notify Members
-        </summary>
-
-        <p style={{ fontSize: '0.85em', color: '#666', marginBottom: '0.5rem' }}>
-          Only one message can be sent at a time. Select either email or SMS for one member.
-        </p>
-
-        <div style={{ marginTop: '1rem' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse' }}>
-            <thead>
-              <tr style={{ borderBottom: '2px solid #ddd' }}>
-                <th style={{ textAlign: 'left', padding: '0.5rem' }}>Member (Task)</th>
-                <th style={{ textAlign: 'center', padding: '0.5rem' }}>Email</th>
-                <th style={{ textAlign: 'center', padding: '0.5rem' }}>SMS</th>
-              </tr>
-            </thead>
-            <tbody>
-              {activeMembers.map((m) => (
-                <tr key={m.id} style={{ borderBottom: '1px solid #eee' }}>
-                  <td style={{ padding: '0.5rem' }}>
-                    {m.name} ({getAssignedTaskName(m.id) || 'Unassigned'})
-                  </td>
-                  <td style={{ textAlign: 'center', padding: '0.5rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={notifyEmail.has(m.id)}
-                      onChange={() => toggleNotifyEmail(m.id)}
-                      disabled={!m.email}
-                    />
-                  </td>
-                  <td style={{ textAlign: 'center', padding: '0.5rem' }}>
-                    <input
-                      type="checkbox"
-                      checked={notifySms.has(m.id)}
-                      onChange={() => toggleNotifySms(m.id)}
-                      disabled={!m.phone}
-                    />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-          <button onClick={handleSendNotifications} style={{ marginTop: '0.75rem', width: '100%', padding: '0.5rem' }}>
-            Send
-          </button>
-          <p style={{ fontSize: '0.85em', color: '#666', marginTop: '0.5rem' }}>
-            Opens pre-filled messages in your Mail/Messages app for each selected recipient — you tap send on each.
-          </p>
-        </div>
       </details>
 
       {/* Members */}
-      <details open style={{ marginTop: '2rem' }}>
-        <summary style={{ cursor: 'pointer', fontSize: '1.1em', fontWeight: 'bold' }}>
+      <details ref={membersRef} onToggle={() => toggleSection('members')}>
+        <summary>
           Manage Members
         </summary>
 
-        <section style={{ marginTop: '1rem' }}>
+        <section>
           <h3>Active Members</h3>
-          <ul style={{ listStyle: 'none', padding: 0 }}>
+
+          {/* Sort Indicator */}
+          <div>
+            <button
+              className="sort-mode-toggle"
+              onClick={handleToggleSortMode}
+              style={{ background: 'none', border: 'none', color: 'var(--color-gold)', textDecoration: 'underline', cursor: 'pointer', padding: '0' }}
+            >
+              Sorted by: {household?.members_sort_mode === 'age'
+                ? `Age (${household.members_age_sort_desc ? 'oldest' : 'youngest'} first)`
+                : 'Manual'}
+            </button>
+          </div>
+
+          <ul>
             {activeMembers.map((m, i) => (
-              <li key={m.id} style={{ padding: '0.5rem 0', borderBottom: '1px solid #eee' }}>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <li key={m.id}>
+                <div>
+                  <input
+                    type="number"
+                    min="1"
+                    max={activeMembers.length}
+                    value={memberReorderInputs[m.id] || ''}
+                    onChange={(e) => {
+                      setMemberReorderInputs(prev => ({ ...prev, [m.id]: e.target.value }))
+                    }}
+                    onBlur={() => {
+                      if (memberReorderInputs[m.id]) {
+                        handleReorderMember(m.id, memberReorderInputs[m.id])
+                      }
+                    }}
+                  />
                   <span>{m.name} (age {calculateAge(m.date_of_birth)})</span>
-                  <div style={{ display: 'flex', gap: '0.25rem' }}>
-                    <button onClick={() => handleMoveMember(i, 'up')} disabled={i === 0}>↑</button>
-                    <button onClick={() => handleMoveMember(i, 'down')} disabled={i === activeMembers.length - 1}>↓</button>
-                    <button onClick={() => handleToggleActive(m.id, false)}>Deactivate</button>
-                    <button onClick={() => handleRemoveMember(m.id)}>Remove</button>
-                  </div>
+                  <button onClick={() => handleToggleActive(m.id, false)}>
+                    Deactivate
+                  </button>
+                  <button onClick={() => handleRemoveMember(m.id)}>
+                    Remove
+                  </button>
                 </div>
-                <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.25rem' }}>
+                <div>
                   <input
                     type="email"
                     placeholder="Email"
                     value={contactDrafts[m.id]?.email || ''}
                     onChange={(e) => updateContactDraft(m.id, 'email', e.target.value)}
-                    style={{ flex: 1, padding: '0.25rem' }}
                   />
                   <input
                     type="tel"
                     placeholder="Phone"
                     value={contactDrafts[m.id]?.phone || ''}
                     onChange={(e) => updateContactDraft(m.id, 'phone', e.target.value)}
-                    style={{ flex: 1, padding: '0.25rem' }}
                   />
-                  <button onClick={() => handleSaveContact(m.id)}>Save</button>
+                  <button onClick={() => handleSaveContact(m.id)}>
+                    Save
+                  </button>
                 </div>
               </li>
             ))}
           </ul>
 
-          <form onSubmit={handleAddMember} style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
+          <form onSubmit={handleAddMember}>
             <input
               type="text"
               placeholder="Name"
               value={newMemberName}
               onChange={(e) => setNewMemberName(e.target.value)}
-              style={{ flex: 2, padding: '0.5rem' }}
             />
             <input
               type="date"
               value={newMemberDob}
               onChange={(e) => setNewMemberDob(e.target.value)}
-              style={{ flex: 1, padding: '0.5rem' }}
             />
             <button type="submit">Add</button>
           </form>
 
           <button
             onClick={() => setShowInactive(!showInactive)}
-            style={{ marginTop: '0.75rem', fontSize: '0.9em' }}
           >
             {showInactive ? 'Hide' : 'Show'} inactive ({inactiveMembers.length})
           </button>
 
           {showInactive && (
-            <ul style={{ listStyle: 'none', padding: 0, marginTop: '0.5rem' }}>
+            <ul>
               {inactiveMembers.map((m) => (
-                <li key={m.id} style={{ display: 'flex', justifyContent: 'space-between', padding: '0.5rem 0', borderBottom: '1px solid #eee', opacity: 0.6 }}>
+                <li key={m.id}>
                   <span>{m.name} (age {calculateAge(m.date_of_birth)})</span>
-                  <button onClick={() => handleToggleActive(m.id, true)}>Activate</button>
+                  <button onClick={() => handleToggleActive(m.id, true)}>
+                    Activate
+                  </button>
                 </li>
               ))}
             </ul>
           )}
         </section>
 
-        <section style={{ marginTop: '1.5rem' }}>
+        <section>
           <h3>Household Code</h3>
-          <p style={{ fontSize: '0.9em', color: '#666' }}>Current: {slug}</p>
-          <form onSubmit={handleRenameHousehold} style={{ display: 'flex', gap: '0.5rem' }}>
+          <p>Current: {slug}</p>
+          <form onSubmit={handleRenameHousehold}>
             <input
               type="text"
               placeholder="New code"
               value={newCode}
               onChange={(e) => setNewCode(e.target.value)}
-              style={{ flex: 1, padding: '0.5rem' }}
             />
             <button type="submit">Update</button>
           </form>

@@ -1,0 +1,21 @@
+  }
+
+  async function handleMoveTask(index: number, direction: 'up' | 'down') {
+    const targetIndex = direction === 'up' ? index - 1 : index + 1
+    if (targetIndex < 0 || targetIndex >= tasks.length) return
+
+    const { error } = await supabase.rpc('swap_task_order', {
+      p_slug: slug,
+      p_task_id_a: tasks[index].id,
+      p_task_id_b: tasks[targetIndex].id,
+    })
+
+    if (error) {
+      setError(error.message)
+      return
+    }
+    loadHousehold()
+  }
+
+  // --- Assignments ---
+

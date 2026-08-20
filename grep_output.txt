@@ -1,0 +1,7 @@
+11:  sort_order: number
+16:type Task = { id: string; name: string; sort_order: number; is_selected: boolean }
+69:      (a: Member, b: Member) => a.sort_order - b.sort_order
+79:    const loadedTasks = (data.tasks || []).sort((a: Task, b: Task) => a.sort_order - b.sort_order)
+131:    const { error } = await supabase.rpc('swap_task_order', {
+196:    const activeMembers = members.filter((m) => m.is_active).sort((a, b) => a.sort_order - b.sort_order)
+363:  const activeMembers = members.filter((m) => m.is_active).sort((a, b) => a.sort_order - b.sort_order)

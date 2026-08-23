@@ -32,7 +32,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '1.5rem', textAlign: 'center' }}>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-charcoal)' }}>
               FHE Rotation is free and always will be. If it's useful to your family, 
-              consider <a href="https://ko-fi.com/ammonspiffy3" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline' }}>giving me a tip</a> to help fund hosting, new features, and future projects.
+              consider <a href="https://ko-fi.com/ammonspiffy3" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline' }}>donating</a> to help fund hosting, new features, and future projects.
             </p>
           </div>
         </footer>

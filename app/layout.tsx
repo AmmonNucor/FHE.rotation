@@ -4,7 +4,6 @@ import Script from "next/script";
 import "./globals.css";
 import KofiWidget from './components/KofiWidget'
 
-
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -35,23 +34,11 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
           <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '1.5rem', textAlign: 'center' }}>
             <p style={{ fontSize: '0.875rem', color: 'var(--color-charcoal)' }}>
               FHE Rotation is free and always will be. If it's useful to your family, 
-              consuder a donation to help support hosting, new features, and new projects.
+              consider a donation to help support hosting, new features, and new projects.
             </p>
           </div>
         </footer>
-<Script 
-  src="https://storage.ko-fi.com/cdn/scripts/overlay-widget.js"
-  onLoad={() => {
-    if (typeof (window as any).kofiWidgetOverlay !== 'undefined') {
-      (window as any).kofiWidgetOverlay.draw('ammonspiffy3', {
-        'type': 'floating-chat',
-        'floating-chat.donateButton.text': 'Support Me',
-        'floating-chat.donateButton.background-color': '#5cb85c',
-        'floating-chat.donateButton.text-color': '#fff'
-      });
-    }
-  }}
-/>
+        <KofiWidget />
       </body>
     </html>
   );

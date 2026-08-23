@@ -1,12 +1,13 @@
 'use client'
 
-import dynamic from 'next/dynamic'
+import { useEffect } from 'react'
 import Script from 'next/script'
 
-const KofiScript = dynamic(() => Promise.resolve(() => (
-  <Script
-    src="https://storage.ko-fi.com/cdn/scripts/overlay-widget.js"
-    onLoad={() => {
+export default function KofiWidget() {
+  useEffect(() => {
+    const script = document.createElement('script')
+    script.src = 'https://storage.ko-fi.com/cdn/scripts/overlay-widget.js'
+    script.onload = () => {
       if (typeof (window as any).kofiWidgetOverlay !== 'undefined') {
         (window as any).kofiWidgetOverlay.draw('ammonspiffy3', {
           'type': 'floating-chat',
@@ -15,10 +16,9 @@ const KofiScript = dynamic(() => Promise.resolve(() => (
           'floating-chat.donateButton.text-color': '#fff'
         });
       }
-    }}
-  />
-)), { ssr: false })
+    }
+    document.head.appendChild(script)
+  }, [])
 
-export default function KofiWidget() {
-  return <KofiScript />
+  return null
 }

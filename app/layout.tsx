@@ -37,15 +37,19 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
             </p>
           </div>
         </footer>
-        <Script src="https://storage.ko-fi.com/cdn/scripts/overlay-widget.js" />
-        <Script id="kofi-widget">
-          {`kofiWidgetOverlay.draw('ammonspiffy3', {
-            'type': 'floating-chat',
-            'floating-chat.donateButton.text': 'Support Me',
-            'floating-chat.donateButton.background-color': '#5cb85c',
-            'floating-chat.donateButton.text-color': '#fff'
-          });`}
-        </Script>
+<Script 
+  src="https://storage.ko-fi.com/cdn/scripts/overlay-widget.js"
+  onLoad={() => {
+    if (typeof (window as any).kofiWidgetOverlay !== 'undefined') {
+      (window as any).kofiWidgetOverlay.draw('ammonspiffy3', {
+        'type': 'floating-chat',
+        'floating-chat.donateButton.text': 'Support Me',
+        'floating-chat.donateButton.background-color': '#5cb85c',
+        'floating-chat.donateButton.text-color': '#fff'
+      });
+    }
+  }}
+/>
       </body>
     </html>
   );

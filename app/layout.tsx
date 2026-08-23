@@ -26,13 +26,15 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
       lang="en"
       className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
     >
-      <body className="min-h-full flex flex-col">
+      <body style={{ minHeight: '100vh', display: 'flex', flexDirection: 'column' }}>
         {children}
-        <footer className="mt-12 pt-6 border-t border-gray-300 text-center text-sm text-gray-600 max-w-2xl mx-auto px-4 py-6">
-          <p>
-            FHE Rotation is free and always will be. If it's useful to your family, 
-            consider <a href="https://ko-fi.com/ammonspiffy3" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-900">giving me a tip</a> to help fund hosting and new features.
-          </p>
+        <footer style={{ borderTop: `1px solid var(--color-taupe)`, marginTop: '3rem' }}>
+          <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '1.5rem', textAlign: 'center' }}>
+            <p style={{ fontSize: '0.875rem', color: 'var(--color-charcoal)' }}>
+              FHE Rotation is free and always will be. If it's useful to your family, 
+              consider <a href="https://ko-fi.com/ammonspiffy3" target="_blank" rel="noopener noreferrer" style={{ textDecoration: 'underline' }}>giving me a tip</a> to help fund hosting, new features, and future projects.
+            </p>
+          </div>
         </footer>
       </body>
     </html>

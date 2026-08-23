@@ -31,7 +31,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
         <footer className="mt-12 pt-6 border-t border-gray-300 text-center text-sm text-gray-600 max-w-2xl mx-auto px-4 py-6">
           <p>
             FHE Rotation is free and always will be. If it's useful to your family, 
-            consider <a href="https://ko-fi.com/ammonspiffy3" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-900">buying me a coffee</a> to help fund hosting and new features.
+            consider <a href="https://ko-fi.com/ammonspiffy3" target="_blank" rel="noopener noreferrer" className="underline hover:text-gray-900">giving me a tip</a> to help fund hosting and new features.
           </p>
         </footer>
       </body>

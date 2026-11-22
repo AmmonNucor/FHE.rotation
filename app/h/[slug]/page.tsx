@@ -304,6 +304,30 @@ export default function HouseholdPage() {
     loadHousehold()
   }
 
+  async function handleShareRotation() {
+  const lines = tasks
+    .filter((t) => t.is_selected)
+    .map((t) => {
+      const rot = rotations.find((r) => r.task_id === t.id)
+      const member = members.find((m) => m.id === rot?.current_member_id)
+      return `${t.name}: ${member?.name || 'Unassigned'}`
+    })
+
+  const text = `${householdName} FHE assignments this week:\n\n${lines.join('\n')}`
+
+  if (navigator.share) {
+    try {
+      await navigator.share({ text })
+    } catch {
+      // user closed the share sheet
+    }
+  } else {
+    await navigator.clipboard.writeText(text)
+    alert('Copied. Paste it into Signal.')
+  }
+}
+
+
   // --- Members ---
 
   async function handleAddMember(e: React.FormEvent) {

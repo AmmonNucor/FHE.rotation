@@ -567,6 +567,9 @@ export default function HouseholdPage() {
             <button onClick={handleRotate}>
               Rotate to Next
             </button>
+            <button onClick={handleShareRotation} style={{ padding: '0.5rem 1rem' }}>
+              Share to Signal
+            </button>
           </div>
         </div>
       </details>
